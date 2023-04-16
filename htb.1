@@ -1,0 +1,48 @@
+.Dd March 2023
+.Dt htb 1
+.Os
+.Sh NAME
+.Nm htb
+.Nd add random padding to gzip and brotli files
+.Sh SYNOPSIS
+.Nm
+.Op Fl k
+.Op Fl m Ar maxsize
+.Ar files
+.Sh DESCRIPTION
+.Nm
+performs the Heal-The-BREACH mitigation technique on compressed files.
+It adds random padding the ignored parts of the compressed file, so that
+the compressed file is still valid, but the sizes are less informative
+to an attacker.
+.Pp
+Specifically, it adds an FEXTRA filed to a
+.Xr gzip 1
+file,
+or creates a new meta-block in a
+.Xr brotli 1
+file.
+.Sh Options
+.Bl -tag -width Ds
+.It Fl k
+Keep the original file.
+.It Fl m Ar maxsize
+The maximum size of the padding.
+The default is 16.
+.El
+.Sh History
+The HTB technique is proposed in
+.Rs
+.%A Rafael Palacios
+.%A Andrea Fariña
+.%A Eugenio F. Sánchez-Úbeda
+.%A Pablo García-de-Zúñiga
+.%T HTB: A Very Effective Method to Protect Web Servers Against BREACH Attack to HTTPS
+.%U https://doi.org/10.1109/ACCESS.2022.3166175
+.%J IEEE Access
+.%D April 11, 2022
+.%V 10
+.%P pp. 40381\(en40390
+.Re
+This implementation is written by
+.Ar Mingye Wang .
