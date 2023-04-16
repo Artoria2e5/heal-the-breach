@@ -6,7 +6,7 @@ public-domain implementation of the HTB mitigation for gzip and brotli
 
 ## Differences from the paper one
 
-* does bortli, in theory
+* will do bortli if someone saves me from bit-banging hell
 * works on windows, in theory
 * same or worse code quality
 * same low amount of error checks (please stop torturing me with c, just let GPT add perror)

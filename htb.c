@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
+#include <assert.h>
 
 // "64K of padding should be enough for everyone" -- William Doors
 // Real talk: 64K is the maximum size of a gzip extra field
@@ -77,6 +80,60 @@ char *htb_fill(uint_pad size) {
   return data;
 }
 
+struct bit_banger {
+  FILE *f;
+  uint8_t buf;
+  uint8_t buf_pos;
+};
+
+void bit_banger_init(struct bit_banger *br, FILE *f) {
+  br->f = f;
+  br->buf = 0;
+  br->buf_pos = 0;
+}
+
+int bit_banger_read(struct bit_banger *br) {
+  if (br->buf_pos == 0) {
+    if (fread(&br->buf, 1, 1, br->f) != 1) {
+      return EOF;
+    }
+    br->buf_pos = 8;
+  }
+  uint8_t bit = br->buf & 1;
+  br->buf >>= 1;
+  br->buf_pos--;
+  return bit;
+}
+
+int bit_banger_read_n(struct bit_banger *br, uint8_t n) {
+  uint8_t ret = 0;
+  for (int i = 0; i < n; i++) {
+    int bit = bit_banger_read(br);
+    if (bit == EOF) {
+      return EOF;
+    }
+    ret |= bit << i;
+  }
+  return ret;
+}
+
+void bit_banger_write(struct bit_banger *bw, uint8_t bit) {
+  bw->buf |= bit << bw->buf_pos;
+  bw->buf_pos++;
+  if (bw->buf_pos == 8) {
+    fwrite(&bw->buf, 1, 1, bw->f);
+    bw->buf = 0;
+    bw->buf_pos = 0;
+  }
+}
+
+void bit_banger_write_n(struct bit_banger *bw, uint8_t n, uint8_t bits) {
+  for (int i = 0; i < n; i++) {
+    bit_banger_write(bw, bits & 1);
+    bits >>= 1;
+  }
+}
+
 bool htb_do(FILE *in, FILE *out, uint_pad maxsize) {
   uint8_t magic[4] = {0};
   if (fread(magic, 1, 4, in) != 4) {
@@ -110,7 +167,7 @@ bool htb_do(FILE *in, FILE *out, uint_pad maxsize) {
       uint16_t extra_len;
       fread(&extra_len, 2, 1, in);
       extra_len = htole16(extra_len);
-      uint16_t extra_len_new = extra_len + 2 + padsize;
+      uint16_t extra_len_new = extra_len + 2 + 2 + padsize;
       extra_len_new = htole16(extra_len_new);
       fwrite(&extra_len_new, 2, 1, out);
       while (extra_len--) {
@@ -119,7 +176,7 @@ bool htb_do(FILE *in, FILE *out, uint_pad maxsize) {
       }
     } else {
       // add extra field
-      uint16_t extra_len = 2 + padsize;
+      uint16_t extra_len = 2 + 2 + padsize;
       extra_len = htole16(extra_len);
       fwrite(&extra_len, 2, 1, out);
     }
@@ -127,8 +184,10 @@ bool htb_do(FILE *in, FILE *out, uint_pad maxsize) {
     fputc('T', out);
     uint16_t padsize_le = htole16(padsize);
     fwrite(&padsize_le, 2, 1, out);
+    fwrite(padding, 1, padsize, out);
 
     if (flag & 0x08) {
+      fputs("gzip name\n", stderr);
       // skip existing filename
       while ((ch = fgetc(in)) != 0) {
         fputc(ch, out);
@@ -137,6 +196,7 @@ bool htb_do(FILE *in, FILE *out, uint_pad maxsize) {
     }
 
     if (flag & 0x10) {
+      fputs("gzip cmt\n", stderr);
       // skip existing comment
       while ((ch = fgetc(in)) != 0) {
         fputc(ch, out);
@@ -146,6 +206,7 @@ bool htb_do(FILE *in, FILE *out, uint_pad maxsize) {
 
     // skip crc16 if present
     if (flag & 0x02) {
+      fputs("gzip crc16 removed\n", stderr);
       uint16_t crc16;
       fread(&crc16, 2, 1, in);
     }
@@ -157,25 +218,49 @@ bool htb_do(FILE *in, FILE *out, uint_pad maxsize) {
     }
   } else {
     // brotli has no magic number, tough luck
-    // read & copy window size
-    uint8_t window_size_meta = magic[0];
-    // unset ISLAST
-    magic[0] &= ~0x01;
-    fwrite(magic, 1, 1, out);
-    // write a new empty meta-block
-    // 0b11'0'10'000
-    uint8_t meta = 0b11010000;
-    uint16_t mskiplen = htole16(padsize - 1);
-    meta &= (mskiplen >> 13) & 0x07;
-    fwrite(&meta, 1, 1, out);
-    mskiplen <<= 3;
-    fwrite(&mskiplen, 2, 1, out);
-    fwrite(padding, 1, padsize, out);
-    // copy rest of file
-    int ch;
-    while ((ch = fgetc(in)) != EOF) {
-      fputc(ch, out);
+    fputs("brotli?\n", stderr);
+    if (padsize == 0) {
+      // brotli can't handle empty meta-blocks
+      padsize = 1;
+      free(padding);
+      padding = strdup("A");
     }
+    struct bit_banger bin = {in, 0, 0};
+    struct bit_banger bout = {out, 0, 0};
+    // read & copy window size
+    uint8_t tmp = bit_banger_read_n(&bin, 1);
+    bit_banger_write_n(&bout, 1, tmp);
+    if (tmp) {
+      tmp = bit_banger_read_n(&bin, 3);
+      bit_banger_write_n(&bout, 3, tmp);
+      if (!tmp) {
+        tmp = bit_banger_read_n(&bin, 3);
+        bit_banger_write_n(&bout, 3, tmp);
+      }
+    }
+    bit_banger_write_n(&bout, 5, 0b11010);
+    bit_banger_write_n(&bout, 16, htole16(padsize - 1));
+    // pad to byte boundary
+    bit_banger_write_n(&bout, 8 - bout.buf_pos, 0);
+    fwrite(padding, 1, padsize, out);
+    // roll in any remaining bits in the buffer
+    uint8_t n = bin.buf_pos;
+    uint8_t remainder = bit_banger_read_n(&bin, bin.buf_pos);
+
+    fputs("brotli data\n", stderr);
+    assert(bin.buf_pos == 0);
+    assert(bout.buf_pos == 0);
+
+    int ch = fgetc(in);
+    // bytewise copy with shift
+    do {
+      uint8_t tmp2 = ch >> n;
+      tmp2 |= remainder;
+      fputc(tmp2, out);
+      remainder = ch << (8 - n);
+      ch = fgetc(in);
+    } while (ch != EOF);
+    fputc(remainder, out);
   }
   free(padding);
   return true;
