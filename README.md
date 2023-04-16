@@ -6,18 +6,16 @@ public-domain implementation of the HTB mitigation for gzip and brotli
 
 ## Differences from the paper one
 
-This one also does brotli in theory.
-
-The code quality is not better at all. What, error checks? please no I've
-had enough of C
-
-It does not overwrite anything in the gzip, which is a very pointless
-distinction and only adds six bytes of overhead by using the extra field
-mechanic
-
-the only saving grace is that the license is clear, lol. 
-
-I hate my work
+* does bortli, in theory
+* works on windows, in theory
+* same or worse code quality
+* same low amount of error checks (please stop torturing me with c, just let GPT add perror)
+* does not overwrite anything in the gzip file, instead adds a field. this is very pointless
+  and adds six bytes of overhead
+* license is clear
+* in theory you can peel off `do_htb` as a library func and skip the process overhead
+* i hate my work while the paper authors are proud of it
+* has a man page, can you believe it??? 
 
 ## links
 
