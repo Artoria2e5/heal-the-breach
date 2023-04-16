@@ -10,8 +10,6 @@
 typedef uint16_t uint_pad;
 typedef uint32_t uint_2pad;
 
-#undef _WIN32
-
 #ifdef _WIN32
 #include <windef.h>
 #include <wincrypt.h>
@@ -225,8 +223,16 @@ int main(int argc, char **argv) {
       char *tempfile = malloc(strlen(argv[i]) + 5);
       strcpy(tempfile, argv[i]);
       strcat(tempfile, ".htb");
+      if (unlink(tempfile)) {
+        if (errno != ENOENT) {
+          perror("unlink");
+          fprintf(stderr, "Could not remove %s.\n", tempfile);
+          return 1;
+        }
+      }
       FILE *out = fopen(tempfile, "wb");
       if (out == NULL) {
+        perror("fopen");
         fprintf(stderr, "Could not open %s for writing.\n", tempfile);
         return 1;
       }
